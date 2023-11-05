@@ -1,5 +1,7 @@
 #! D:\Personal Projects\Portfolio\ImageCaptionGenerator\.venv\Scripts\python.exe
 
+# Image Caption Generator
+# Importing necessary libraries
 import os
 import pickle
 import numpy as np
@@ -17,44 +19,54 @@ from PIL import Image
 from nltk.translate.bleu_score import corpus_bleu
 import matplotlib.pyplot as plt
 
+# Directories for image data
 BASE_DIR = '../ImageDataset/BaseDir'
 WORKING_DIR = '../ImageDataset/WorkingDir'
 
 # Extract Image Features
-
 # load vgg16 model
 model = VGG16()
 
-# restructure model
+# Restructure the model without the last classification layer
 model = Model(inputs=model.inputs, outputs=model.layers[-2].output)
 
-# summarize
+# Display the summary of the model
 print(model.summary())
 
-# Extract features from image
+# Extract features from images
+# Iterate through images, extract VGG16 features, and store in a dictionary
 features = {}
 directory = os.path.join(BASE_DIR, 'Images')
 
 for img_name in tqdm(os.listdir(directory)):
+    # Load and preprocess the image
     img_path = directory + '/' + img_name
     image = load_img(img_path, target_size=(224, 224))
     image = img_to_array(image)
     image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
     image = preprocess_input(image)
+    # Extract features using VGG16 model
     feature = model.predict(image, verbose=0)
     image_id = img_name.split('.')[0]
     features[image_id] = feature
 
+# Store the extracted features in a file
 pickle.dump(features, open(os.path.join(WORKING_DIR, 'features.pkl'), 'wb'))
 
+# Load extracted features from the file
 with open(os.path.join(WORKING_DIR, 'features.pkl'), 'rb') as f:
     features = pickle.load(f)
 
+# Load image captions
 with open(os.path.join(BASE_DIR, 'captions.txt'), 'r') as f:
-    next(f)
+    next(f)  # Skip the header
     captions_doc = f.read()
 
+# Create a dictionary to map image IDs to their captions
 mapping = {}
+
+
+# Process the captions and create the mapping
 for line in tqdm(captions_doc.split('\n')):
     tokens = line.split(',')
     if len(line) < 2:
@@ -68,11 +80,14 @@ for line in tqdm(captions_doc.split('\n')):
     mapping[image_id].append(caption)
 
 
+# Function to clean and preprocess captions
 def clean(mapping):
     for key, captions in mapping.items():
         for i in range(len(captions)):
             caption = captions[i]
             caption = caption.lower()
+
+            # Apply regex to clean captions
             caption = caption.replace('[^A-Za-z]', '')
             caption = caption.replace('\s+', ' ')
             caption = 'startseq' + \
@@ -81,6 +96,7 @@ def clean(mapping):
             captions[i] = caption
 
 
+# Clean the captions in the mapping
 clean(mapping)
 
 all_captions = []
@@ -88,6 +104,8 @@ for key in mapping:
     for caption in mapping[key]:
         all_captions.append(caption)
 
+
+# Tokenize captions and obtain vocabulary size and maximum caption length
 tokenizer = Tokenizer()
 tokenizer.fit_on_texts(all_captions)
 vocab_size = len(tokenizer.word_index) + 1
@@ -101,7 +119,7 @@ test = image_ids[split:]
 
 
 def data_generator(data_keys, mapping, features, tokenizer, max_length, vocab_size, batch_size):
-    X1, X2, y = list(), list(), list()
+    X1, X2, y = [], [], []
     n = 0
     while 1:
         for key in data_keys:
@@ -125,6 +143,7 @@ def data_generator(data_keys, mapping, features, tokenizer, max_length, vocab_si
                 n = 0
 
 
+# Define and compile the neural network model
 inputs1 = Input(shape=(4096,))
 fe1 = Dropout(0.4)(inputs1)
 fe2 = Dense(256, activation='relu')(fe1)
@@ -143,6 +162,7 @@ model.compile(loss='categorical_crossentropy', optimizer='adam')
 # plot_model(model, show_shapes=True)
 
 
+# Training the model
 epochs = 20
 batch_size = 32
 steps = len(train) // batch_size
@@ -150,9 +170,13 @@ steps = len(train) // batch_size
 for i in range(epochs):
     generator = data_generator(
         train, mapping, features, tokenizer, max_length, vocab_size, batch_size)
+    # Fit the model using the data generator
     model.fit(generator, epochs=1, steps_per_epoch=steps, verbose=1)
 
+# Save the trained model
 model.save(WORKING_DIR+'/best_model.h5')
+
+# Function to convert index to word using tokenizer
 
 
 def idx_to_word(integer, tokenizer):
@@ -160,6 +184,8 @@ def idx_to_word(integer, tokenizer):
         if index == integer:
             return word
     return None
+
+# Function to predict captions using the trained model
 
 
 def predict_caption(model, image, tokenizer, max_length):
@@ -190,6 +216,7 @@ for key in tqdm(test):
     predicted.append(y_pred)
 
 
+# Function to generate captions for a specific image
 def generate_caption(image_name):
     image_id = image_name.split('.')[0]
     img_path = os.path.join(BASE_DIR, "Images", image_name)
@@ -205,4 +232,5 @@ def generate_caption(image_name):
     plt.imshow(image)
 
 
+# Example: Generate and display captions for a specific image
 generate_caption("1001773457_577c3a7d70.jpg")
